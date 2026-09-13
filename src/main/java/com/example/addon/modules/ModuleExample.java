@@ -73,7 +73,6 @@ public class ModuleExample extends Module {
         this.susBlocks.clear();
         this.alertedPillars.clear();
 
-        // 5 loại khối theo dõi: Stone, Granite, Diorite, Andesite, Gravel
         this.targetFive.clear();
         this.targetFive.add(Blocks.STONE);
         this.targetFive.add(Blocks.GRANITE);
@@ -89,17 +88,27 @@ public class ModuleExample extends Module {
         this.susBlocks.clear();
         BlockPos playerPos = this.mc.player.getBlockPos();
 
-        int rad = this.customRadius.get();
+        int playerChunkX = playerPos.getX() >> 4;
+        int playerChunkZ = playerPos.getZ() >> 4;
 
-        for (int x = -rad; x <= rad; x++) {
-            for (int y = -rad; y <= rad; y++) {
-                for (int z = -rad; z <= rad; z++) {
-                    BlockPos pos = playerPos.add(x, y, z);
-                    Block centerBlock = this.mc.world.getBlockState(pos).getBlock();
+        // Quét bán kính 6 chunk quanh người chơi (Mặt phẳng XZ 13x13 Chunk)
+        for (int chunkX = playerChunkX - 6; chunkX <= playerChunkX + 6; chunkX++) {
+            for (int chunkZ = playerChunkZ - 6; chunkZ <= playerChunkZ + 6; chunkZ++) {
+                int startX = chunkX << 4;
+                int startZ = chunkZ << 4;
 
-                    if (this.targetFive.contains(centerBlock)) {
-                        if (checkSusPattern(pos, centerBlock)) {
-                            this.susBlocks.add(pos);
+                for (int x = 0; x < 16; x++) {
+                    for (int z = 0; z < 16; z++) {
+                        // Chỉ quét từ Y = 14 trở lên
+                        for (int y = 14; y <= 320; y++) {
+                            BlockPos pos = new BlockPos(startX + x, y, startZ + z);
+                            Block centerBlock = this.mc.world.getBlockState(pos).getBlock();
+
+                            if (this.targetFive.contains(centerBlock)) {
+                                if (checkSusPattern(pos, centerBlock)) {
+                                    this.susBlocks.add(pos);
+                                }
+                            }
                         }
                     }
                 }
@@ -109,8 +118,9 @@ public class ModuleExample extends Module {
         checkVerticalPillars();
     }
 
+    // Kiểm tra 4 hướng ngang (XZ): Đông, Tây, Nam, Bắc
     private boolean checkSusPattern(BlockPos pos, Block centerBlock) {
-        Map<Block, Integer> neighborCounts = new HashMap<>();
+        int sameTypeCount = 0;
         Direction[] horizontalDirections = new Direction[]{
             Direction.NORTH,
             Direction.SOUTH,
@@ -122,18 +132,12 @@ public class ModuleExample extends Module {
             BlockPos neighborPos = pos.offset(dir);
             Block neighborBlock = this.mc.world.getBlockState(neighborPos).getBlock();
 
-            if (this.targetFive.contains(neighborBlock) && neighborBlock != centerBlock) {
-                neighborCounts.put(neighborBlock, neighborCounts.getOrDefault(neighborBlock, 0) + 1);
+            if (neighborBlock == centerBlock) {
+                sameTypeCount++;
             }
         }
 
-        for (int count : neighborCounts.values()) {
-            if (count >= 3) {
-                return true;
-            }
-        }
-
-        return false;
+        return sameTypeCount >= 4;
     }
 
     private void checkVerticalPillars() {
@@ -174,7 +178,12 @@ public class ModuleExample extends Module {
         if (this.susBlocks.isEmpty()) return;
 
         for (BlockPos pos : this.susBlocks) {
-            Box box = new Box(pos);
+            // Cột Highlight kéo dài từ vị trí khối lên cao (+100 ô)
+            Box box = new Box(
+                pos.getX(), pos.getY(), pos.getZ(),
+                pos.getX() + 1.0, pos.getY() + 100.0, pos.getZ() + 1.0
+            );
+
             event.renderer.box(
                 box,
                 this.sideColor.get(),
