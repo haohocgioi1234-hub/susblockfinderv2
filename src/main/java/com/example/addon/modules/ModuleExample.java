@@ -15,36 +15,13 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Box;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.world.chunk.WorldChunk;
 
 import java.util.*;
 
 public class ModuleExample extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgRender = this.settings.createGroup("Render");
-
-    private final Setting<Boolean> useRenderDistance = sgGeneral.add(new BoolSetting.Builder()
-        .name("use-render-distance")
-        .description("Use game render distance as scan radius automatically.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Integer> customRadius = sgGeneral.add(new IntSetting.Builder()
-        .name("custom-radius")
-        .description("Custom scan radius in blocks.")
-        .defaultValue(16)
-        .min(1)
-        .max(64)
-        .visible(() -> !useRenderDistance.get())
-        .build()
-    );
-
-    private final Setting<Boolean> notifyChat = sgGeneral.add(new BoolSetting.Builder()
-        .name("chat-notification")
-        .description("Send chat message when a vertical stack of height >= 3 is detected.")
-        .defaultValue(true)
-        .build()
-    );
 
     private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
         .name("side-color")
@@ -63,9 +40,12 @@ public class ModuleExample extends Module {
     private final Set<BlockPos> susBlocks = new HashSet<>();
     private final Set<BlockPos> alertedPillars = new HashSet<>();
     private final List<Block> targetFive = new ArrayList<>();
+    
+    private int currentChunkIndex = 0;
+    private final List<long[]> chunkList = new ArrayList<>();
 
     public ModuleExample() {
-        super(AddonTemplate.CATEGORY, "sus-block-finder", "Detects suspicious natural block patterns and vertical stacks.");
+        super(AddonTemplate.CATEGORY, "sus-block-finder", "Detects suspicious natural block patterns optimized.");
     }
 
     @Override
@@ -79,53 +59,75 @@ public class ModuleExample extends Module {
         this.targetFive.add(Blocks.DIORITE);
         this.targetFive.add(Blocks.ANDESITE);
         this.targetFive.add(Blocks.GRAVEL);
+        
+        this.currentChunkIndex = 0;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (this.mc.world == null || this.mc.player == null) return;
 
-        this.susBlocks.clear();
         BlockPos playerPos = this.mc.player.getBlockPos();
-
         int playerChunkX = playerPos.getX() >> 4;
         int playerChunkZ = playerPos.getZ() >> 4;
 
-        // Quét bán kính 6 chunk quanh người chơi (Mặt phẳng XZ 13x13 Chunk)
-        for (int chunkX = playerChunkX - 6; chunkX <= playerChunkX + 6; chunkX++) {
-            for (int chunkZ = playerChunkZ - 6; chunkZ <= playerChunkZ + 6; chunkZ++) {
-                int startX = chunkX << 4;
-                int startZ = chunkZ << 4;
-
-                for (int x = 0; x < 16; x++) {
-                    for (int z = 0; z < 16; z++) {
-                        // Chỉ quét từ Y = 14 trở lên
-                        for (int y = 14; y <= 320; y++) {
-                            BlockPos pos = new BlockPos(startX + x, y, startZ + z);
-                            Block centerBlock = this.mc.world.getBlockState(pos).getBlock();
-
-                            if (this.targetFive.contains(centerBlock)) {
-                                if (checkSusPattern(pos, centerBlock)) {
-                                    this.susBlocks.add(pos);
-                                }
-                            }
-                        }
-                    }
+        // Tạo danh sách 169 Chunk (13x13)
+        if (chunkList.isEmpty() || currentChunkIndex >= chunkList.size()) {
+            chunkList.clear();
+            for (int cx = playerChunkX - 6; cx <= playerChunkX + 6; cx++) {
+                for (int cz = playerChunkZ - 6; cz <= playerChunkZ + 6; cz++) {
+                    chunkList.add(new long[]{cx, cz});
                 }
             }
+            currentChunkIndex = 0;
+            this.susBlocks.clear(); // Làm mới danh sách khi bắt đầu vòng quét mới
+        }
+
+        // TỐI ƯU 3: Mỗi tick chỉ quét 15 Chunk thay vì 169 Chunk cùng lúc
+        int chunksToProcess = 15;
+        while (chunksToProcess > 0 && currentChunkIndex < chunkList.size()) {
+            long[] chunkCoords = chunkList.get(currentChunkIndex);
+            int chunkX = (int) chunkCoords[0];
+            int chunkZ = (int) chunkCoords[1];
+
+            // TỐI ƯU 1: Kiểm tra xem Chunk đã được load chưa, bỏ qua nếu chưa load
+            if (this.mc.world.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
+                WorldChunk chunk = this.mc.world.getChunk(chunkX, chunkZ);
+                scanChunk(chunk);
+            }
+
+            currentChunkIndex++;
+            chunksToProcess--;
         }
 
         checkVerticalPillars();
     }
 
-    // Kiểm tra 4 hướng ngang (XZ): Đông, Tây, Nam, Bắc
+    private void scanChunk(WorldChunk chunk) {
+        int startX = chunk.getPos().getStartX();
+        int startZ = chunk.getPos().getStartZ();
+
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int y = 14; y <= 320; y++) {
+                    BlockPos pos = new BlockPos(startX + x, y, startZ + z);
+                    Block centerBlock = chunk.getBlockState(pos).getBlock();
+
+                    // TỐI ƯU 2: Lọc nhanh khối không thuộc targetFive
+                    if (this.targetFive.contains(centerBlock)) {
+                        if (checkSusPattern(pos, centerBlock)) {
+                            this.susBlocks.add(pos);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private boolean checkSusPattern(BlockPos pos, Block centerBlock) {
         int sameTypeCount = 0;
         Direction[] horizontalDirections = new Direction[]{
-            Direction.NORTH,
-            Direction.SOUTH,
-            Direction.WEST,
-            Direction.EAST
+            Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
         };
 
         for (Direction dir : horizontalDirections) {
@@ -159,16 +161,12 @@ public class ModuleExample extends Module {
                 current = current.up();
             }
 
-            if (height >= 3) {
-                if (!this.alertedPillars.contains(bottomPos)) {
-                    this.alertedPillars.add(bottomPos);
-                    if (this.notifyChat.get()) {
-                        ChatUtils.info(String.format(
-                            "[SusBlockFinder] Suspicious vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
-                            height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
-                        ));
-                    }
-                }
+            if (height >= 3 && !this.alertedPillars.contains(bottomPos)) {
+                this.alertedPillars.add(bottomPos);
+                ChatUtils.info(String.format(
+                    "[SusBlockFinder] Vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
+                    height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
+                ));
             }
         }
     }
@@ -178,7 +176,6 @@ public class ModuleExample extends Module {
         if (this.susBlocks.isEmpty()) return;
 
         for (BlockPos pos : this.susBlocks) {
-            // Cột Highlight kéo dài từ vị trí khối lên cao (+100 ô)
             Box box = new Box(
                 pos.getX(), pos.getY(), pos.getZ(),
                 pos.getX() + 1.0, pos.getY() + 100.0, pos.getZ() + 1.0
