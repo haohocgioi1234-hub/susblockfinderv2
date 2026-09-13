@@ -23,6 +23,30 @@ public class ModuleExample extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgRender = this.settings.createGroup("Render");
 
+    private final Setting<Boolean> useRenderDistance = sgGeneral.add(new BoolSetting.Builder()
+        .name("use-render-distance")
+        .description("Use game render distance as scan radius automatically.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> customRadius = sgGeneral.add(new IntSetting.Builder()
+        .name("custom-radius")
+        .description("Custom scan radius in blocks.")
+        .defaultValue(16)
+        .min(1)
+        .max(64)
+        .visible(() -> !useRenderDistance.get())
+        .build()
+    );
+
+    private final Setting<Boolean> notifyChat = sgGeneral.add(new BoolSetting.Builder()
+        .name("chat-notification")
+        .description("Send chat message when a vertical stack of height >= 3 is detected.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
         .name("side-color")
         .description("Side color of highlighted sus blocks.")
@@ -40,12 +64,12 @@ public class ModuleExample extends Module {
     private final Set<BlockPos> susBlocks = new HashSet<>();
     private final Set<BlockPos> alertedPillars = new HashSet<>();
     private final List<Block> targetFive = new ArrayList<>();
-    
+
     private int currentChunkIndex = 0;
     private final List<long[]> chunkList = new ArrayList<>();
 
     public ModuleExample() {
-        super(AddonTemplate.CATEGORY, "sus-block-finder", "Detects suspicious natural block patterns optimized.");
+        super(AddonTemplate.CATEGORY, "sus-block-finder", "Detects suspicious natural block patterns and vertical stacks.");
     }
 
     @Override
@@ -59,8 +83,9 @@ public class ModuleExample extends Module {
         this.targetFive.add(Blocks.DIORITE);
         this.targetFive.add(Blocks.ANDESITE);
         this.targetFive.add(Blocks.GRAVEL);
-        
+
         this.currentChunkIndex = 0;
+        this.chunkList.clear();
     }
 
     @EventHandler
@@ -71,7 +96,7 @@ public class ModuleExample extends Module {
         int playerChunkX = playerPos.getX() >> 4;
         int playerChunkZ = playerPos.getZ() >> 4;
 
-        // Tạo danh sách 169 Chunk (13x13)
+        // Khởi tạo danh sách 169 Chunk (13x13 Chunk quanh người chơi)
         if (chunkList.isEmpty() || currentChunkIndex >= chunkList.size()) {
             chunkList.clear();
             for (int cx = playerChunkX - 6; cx <= playerChunkX + 6; cx++) {
@@ -80,17 +105,16 @@ public class ModuleExample extends Module {
                 }
             }
             currentChunkIndex = 0;
-            this.susBlocks.clear(); // Làm mới danh sách khi bắt đầu vòng quét mới
+            this.susBlocks.clear();
         }
 
-        // TỐI ƯU 3: Mỗi tick chỉ quét 15 Chunk thay vì 169 Chunk cùng lúc
+        // TỐI ƯU 1: Mỗi tick chỉ xử lý rải rác 15 Chunk để duy trì FPS mượt mà
         int chunksToProcess = 15;
         while (chunksToProcess > 0 && currentChunkIndex < chunkList.size()) {
             long[] chunkCoords = chunkList.get(currentChunkIndex);
             int chunkX = (int) chunkCoords[0];
             int chunkZ = (int) chunkCoords[1];
 
-            // TỐI ƯU 1: Kiểm tra xem Chunk đã được load chưa, bỏ qua nếu chưa load
             if (this.mc.world.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
                 WorldChunk chunk = this.mc.world.getChunk(chunkX, chunkZ);
                 scanChunk(chunk);
@@ -109,11 +133,11 @@ public class ModuleExample extends Module {
 
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
+                // Chỉ quét từ Y = 14 trở lên
                 for (int y = 14; y <= 320; y++) {
                     BlockPos pos = new BlockPos(startX + x, y, startZ + z);
                     Block centerBlock = chunk.getBlockState(pos).getBlock();
 
-                    // TỐI ƯU 2: Lọc nhanh khối không thuộc targetFive
                     if (this.targetFive.contains(centerBlock)) {
                         if (checkSusPattern(pos, centerBlock)) {
                             this.susBlocks.add(pos);
@@ -124,10 +148,14 @@ public class ModuleExample extends Module {
         }
     }
 
+    // Kiểm tra 4 hướng ngang (XZ): Đông, Tây, Nam, Bắc
     private boolean checkSusPattern(BlockPos pos, Block centerBlock) {
         int sameTypeCount = 0;
         Direction[] horizontalDirections = new Direction[]{
-            Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
+            Direction.NORTH,
+            Direction.SOUTH,
+            Direction.WEST,
+            Direction.EAST
         };
 
         for (Direction dir : horizontalDirections) {
@@ -161,33 +189,47 @@ public class ModuleExample extends Module {
                 current = current.up();
             }
 
-            if (height >= 3 && !this.alertedPillars.contains(bottomPos)) {
-                this.alertedPillars.add(bottomPos);
-                ChatUtils.info(String.format(
-                    "[SusBlockFinder] Vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
-                    height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
-                ));
+            if (height >= 3) {
+                if (!this.alertedPillars.contains(bottomPos)) {
+                    this.alertedPillars.add(bottomPos);
+                    if (this.notifyChat.get()) {
+                        ChatUtils.info(String.format(
+                            "[SusBlockFinder] Suspicious vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
+                            height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
+                        ));
+                    }
+                }
             }
         }
     }
 
     @EventHandler
     private void onRender3d(Render3DEvent event) {
-        if (this.susBlocks.isEmpty()) return;
+        if (this.alertedPillars.isEmpty()) return;
 
-        for (BlockPos pos : this.susBlocks) {
+        int renderCount = 0;
+        int maxRenderLimit = 100; // TỐI ƯU 2: Giới hạn tối đa 100 cột vẽ cùng lúc
+
+        // Chỉ vẽ đại diện cho các chân cột đã xác nhận (alertedPillars)
+        for (BlockPos pos : this.alertedPillars) {
+            if (renderCount >= maxRenderLimit) break;
+
+            // Hình hộp kéo dài 100 ô Y lên trời
             Box box = new Box(
                 pos.getX(), pos.getY(), pos.getZ(),
                 pos.getX() + 1.0, pos.getY() + 100.0, pos.getZ() + 1.0
             );
 
+            // TỐI ƯU 3: Dùng ShapeMode.Lines chỉ vẽ khung viền nhẹ nhàng cho GPU
             event.renderer.box(
                 box,
                 this.sideColor.get(),
                 this.lineColor.get(),
-                ShapeMode.Both,
+                ShapeMode.Lines,
                 0
             );
+
+            renderCount++;
         }
     }
 }
