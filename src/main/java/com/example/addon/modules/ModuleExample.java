@@ -174,7 +174,7 @@ public class ModuleExample extends Module {
         if (this.susBlocks.isEmpty()) return;
 
         for (BlockPos pos : this.susBlocks) {
-            Box box = new AABB(pos);
+            Box box = new Box(pos);
             event.renderer.box(
                 box,
                 this.sideColor.get(),
