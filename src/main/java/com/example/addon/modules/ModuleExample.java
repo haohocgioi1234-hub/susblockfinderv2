@@ -84,18 +84,18 @@ public class ModuleExample extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (this.mc.level == null || this.mc.player == null) return;
+        if (this.mc.world == null || this.mc.player == null) return;
 
         this.susBlocks.clear();
-        BlockPos playerPos = this.mc.player.blockPosition();
+        BlockPos playerPos = this.mc.player.getBlockPos();
 
         int rad = this.customRadius.get();
 
         for (int x = -rad; x <= rad; x++) {
             for (int y = -rad; y <= rad; y++) {
                 for (int z = -rad; z <= rad; z++) {
-                    BlockPos pos = playerPos.offset(x, y, z);
-                    Block centerBlock = this.mc.level.getBlockState(pos).getBlock();
+                    BlockPos pos = playerPos.add(x, y, z);
+                    Block centerBlock = this.mc.world.getBlockState(pos).getBlock();
 
                     if (this.targetFive.contains(centerBlock)) {
                         if (checkSusPattern(pos, centerBlock)) {
@@ -119,8 +119,8 @@ public class ModuleExample extends Module {
         };
 
         for (Direction dir : horizontalDirections) {
-            BlockPos neighborPos = pos.relative(dir);
-            Block neighborBlock = this.mc.level.getBlockState(neighborPos).getBlock();
+            BlockPos neighborPos = pos.offset(dir);
+            Block neighborBlock = this.mc.world.getBlockState(neighborPos).getBlock();
 
             if (this.targetFive.contains(neighborBlock) && neighborBlock != centerBlock) {
                 neighborCounts.put(neighborBlock, neighborCounts.getOrDefault(neighborBlock, 0) + 1);
@@ -143,8 +143,8 @@ public class ModuleExample extends Module {
             if (visited.contains(pos)) continue;
 
             BlockPos bottomPos = pos;
-            while (this.susBlocks.contains(bottomPos.below())) {
-                bottomPos = bottomPos.below();
+            while (this.susBlocks.contains(bottomPos.down())) {
+                bottomPos = bottomPos.down();
             }
 
             int height = 0;
@@ -152,7 +152,7 @@ public class ModuleExample extends Module {
             while (this.susBlocks.contains(current)) {
                 visited.add(current);
                 height++;
-                current = current.above();
+                current = current.up();
             }
 
             if (height >= 3) {
@@ -174,7 +174,7 @@ public class ModuleExample extends Module {
         if (this.susBlocks.isEmpty()) return;
 
         for (BlockPos pos : this.susBlocks) {
-            AABB box = new AABB(pos);
+            Box box = new AABB(pos);
             event.renderer.box(
                 box,
                 this.sideColor.get(),
