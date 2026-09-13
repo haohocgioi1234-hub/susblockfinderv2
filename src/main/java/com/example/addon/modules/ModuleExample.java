@@ -96,7 +96,7 @@ public class ModuleExample extends Module {
         int playerChunkX = playerPos.getX() >> 4;
         int playerChunkZ = playerPos.getZ() >> 4;
 
-        // Khởi tạo danh sách 169 Chunk (13x13 Chunk quanh người chơi)
+        // Tạo danh sách 169 Chunk (13x13 Chunk quanh người chơi)
         if (chunkList.isEmpty() || currentChunkIndex >= chunkList.size()) {
             chunkList.clear();
             for (int cx = playerChunkX - 6; cx <= playerChunkX + 6; cx++) {
@@ -108,7 +108,7 @@ public class ModuleExample extends Module {
             this.susBlocks.clear();
         }
 
-        // TỐI ƯU 1: Mỗi tick chỉ xử lý rải rác 15 Chunk để duy trì FPS mượt mà
+        // Mỗi tick chỉ xử lý 15 Chunk để duy trì FPS mượt mà
         int chunksToProcess = 15;
         while (chunksToProcess > 0 && currentChunkIndex < chunkList.size()) {
             long[] chunkCoords = chunkList.get(currentChunkIndex);
@@ -189,15 +189,14 @@ public class ModuleExample extends Module {
                 current = current.up();
             }
 
-            if (height >= 3) {
-                if (!this.alertedPillars.contains(bottomPos)) {
-                    this.alertedPillars.add(bottomPos);
-                    if (this.notifyChat.get()) {
-                        ChatUtils.info(String.format(
-                            "[SusBlockFinder] Suspicious vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
-                            height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
-                        ));
-                    }
+            // Gửi chat notification khi phát hiện cột có height >= 3
+            if (height >= 3 && !this.alertedPillars.contains(bottomPos)) {
+                this.alertedPillars.add(bottomPos);
+                if (this.notifyChat.get()) {
+                    ChatUtils.info(String.format(
+                        "[SusBlockFinder] Vertical stack detected! Height: %d at X: %d, Y: %d, Z: %d",
+                        height, bottomPos.getX(), bottomPos.getY(), bottomPos.getZ()
+                    ));
                 }
             }
         }
@@ -205,31 +204,49 @@ public class ModuleExample extends Module {
 
     @EventHandler
     private void onRender3d(Render3DEvent event) {
-        if (this.alertedPillars.isEmpty()) return;
+        if (this.susBlocks.isEmpty()) return;
 
+        Set<BlockPos> visited = new HashSet<>();
         int renderCount = 0;
-        int maxRenderLimit = 100; // TỐI ƯU 2: Giới hạn tối đa 100 cột vẽ cùng lúc
+        int maxRenderLimit = 50; // Giới hạn số cột vẽ để tránh lag
 
-        // Chỉ vẽ đại diện cho các chân cột đã xác nhận (alertedPillars)
-        for (BlockPos pos : this.alertedPillars) {
-            if (renderCount >= maxRenderLimit) break;
+        for (BlockPos pos : this.susBlocks) {
+            if (visited.contains(pos)) continue;
 
-            // Hình hộp kéo dài 100 ô Y lên trời
-            Box box = new Box(
-                pos.getX(), pos.getY(), pos.getZ(),
-                pos.getX() + 1.0, pos.getY() + 100.0, pos.getZ() + 1.0
-            );
+            // Tìm khối chân dưới cùng của cụm
+            BlockPos bottomPos = pos;
+            while (this.susBlocks.contains(bottomPos.down())) {
+                bottomPos = bottomPos.down();
+            }
 
-            // TỐI ƯU 3: Dùng ShapeMode.Lines chỉ vẽ khung viền nhẹ nhàng cho GPU
-            event.renderer.box(
-                box,
-                this.sideColor.get(),
-                this.lineColor.get(),
-                ShapeMode.Lines,
-                0
-            );
+            // Tính chiều cao liên tục của cụm
+            int height = 0;
+            BlockPos current = bottomPos;
+            while (this.susBlocks.contains(current)) {
+                visited.add(current);
+                height++;
+                current = current.up();
+            }
 
-            renderCount++;
+            // CHỈ VẼ CỘT HIGHLIGHT KHI CHIỀU CAO CỘT >= 3
+            if (height >= 3) {
+                if (renderCount >= maxRenderLimit) break;
+
+                Box box = new Box(
+                    bottomPos.getX(), bottomPos.getY(), bottomPos.getZ(),
+                    bottomPos.getX() + 1.0, bottomPos.getY() + 100.0, bottomPos.getZ() + 1.0
+                );
+
+                event.renderer.box(
+                    box,
+                    this.sideColor.get(),
+                    this.lineColor.get(),
+                    ShapeMode.Lines,
+                    0
+                );
+
+                renderCount++;
+            }
         }
     }
 }
