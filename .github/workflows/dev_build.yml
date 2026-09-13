@@ -1,9 +1,16 @@
-name: Publish Development Build
-on: push
+name: Build Addon
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -19,6 +26,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Build with Gradle
         run: ./gradlew build
