@@ -1,7 +1,6 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
-import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
@@ -73,25 +72,21 @@ public class ModuleExample extends Module {
         this.targetFive.add(Blocks.GRAVEL);
     }
 
-    // 1. LẮNG NGHE KHI SERVER GỬI PACKET CHUNK MỚI HOẶC NẠP THÊM DỮ LIỆU CHUNK
     @EventHandler
     private void onChunkData(ChunkDataEvent event) {
-        WorldChunk chunk = event.chunk;
+        WorldChunk chunk = event.chunk();
         if (chunk != null) {
             ChunkPos cPos = chunk.getPos();
-            // Đưa Chunk này vào danh sách cần quét/quét lại
             if (!chunksToScan.contains(cPos)) {
                 chunksToScan.add(cPos);
             }
         }
     }
 
-    // 2. LẮNG NGHE KHI CÓ KHỐI TRONG CHUNK THAY ĐỔI
     @EventHandler
     private void onBlockUpdate(BlockUpdateEvent event) {
         BlockPos pos = event.pos;
         ChunkPos cPos = new ChunkPos(pos);
-        // Đánh dấu Chunk chứa khối này cần quét lại
         scannedChunks.remove(cPos);
         if (!chunksToScan.contains(cPos)) {
             chunksToScan.add(cPos);
@@ -106,7 +101,6 @@ public class ModuleExample extends Module {
         int playerChunkX = playerPos.getX() >> 4;
         int playerChunkZ = playerPos.getZ() >> 4;
 
-        // Bổ sung các Chunk chưa từng nạp trong bán kính 13x13 (6 chunk quanh player)
         for (int cx = playerChunkX - 6; cx <= playerChunkX + 6; cx++) {
             for (int cz = playerChunkZ - 6; cz <= playerChunkZ + 6; cz++) {
                 ChunkPos cPos = new ChunkPos(cx, cz);
@@ -116,7 +110,6 @@ public class ModuleExample extends Module {
             }
         }
 
-        // Xử lý đúng 1 Chunk / 1 Tick khi có sự kiện cập nhật
         if (!chunksToScan.isEmpty()) {
             ChunkPos targetChunkPos = chunksToScan.poll();
             if (this.mc.world.getChunkManager().isChunkLoaded(targetChunkPos.x, targetChunkPos.z)) {
